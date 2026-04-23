@@ -14,6 +14,8 @@ import (
 	"github.com/NothingTV/cf-to-hcloud-dns/internal/dotenv"
 	"github.com/NothingTV/cf-to-hcloud-dns/internal/hetzner"
 	"github.com/NothingTV/cf-to-hcloud-dns/internal/migrate"
+
+	"golang.org/x/net/idna"
 )
 
 const helpText = `dns-migrate — import DNS records from Cloudflare into Hetzner DNS
@@ -174,6 +176,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "run with --help for usage.")
 		os.Exit(2)
 	}
+
+	// Convert IDN (e.g. "hülsbeck.de") to ASCII/punycode ("xn--hlsbeck-n2a.de").
+	// Hetzner Cloud rejects non-ASCII zone names with 422 "invalid syntax",
+	// and Cloudflare already serves records in ACE form — so converting up
+	// front keeps the zone name and record suffixes aligned.
+	asciiDomain, err := idna.Lookup.ToASCII(strings.TrimSuffix(strings.ToLower(*domain), "."))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: invalid domain %q: %v\n", *domain, err)
+		os.Exit(2)
+	}
+	*domain = asciiDomain
 
 	cfTok := firstNonEmpty(*cfToken, os.Getenv("CLOUDFLARE_API_TOKEN"))
 	hzTok := firstNonEmpty(*hzToken, os.Getenv("HETZNER_API_TOKEN"))

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 const defaultBaseURL = "https://api.cloudflare.com/client/v4"
@@ -67,7 +69,20 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.get(ctx, "/user/tokens/verify", &out)
 }
 
+// FindZone looks up a zone by name. Cloudflare stores IDN zones under their
+// Unicode form (e.g. "hülsbeck.de"), not punycode — so if the caller passes
+// the ASCII/ACE form and it doesn't match, retry with the Unicode form.
 func (c *Client) FindZone(ctx context.Context, name string) (*Zone, error) {
+	if z, err := c.findZoneExact(ctx, name); err != nil || z != nil {
+		return z, err
+	}
+	if unicodeName, err := idna.Lookup.ToUnicode(name); err == nil && unicodeName != name {
+		return c.findZoneExact(ctx, unicodeName)
+	}
+	return nil, nil
+}
+
+func (c *Client) findZoneExact(ctx context.Context, name string) (*Zone, error) {
 	q := url.Values{"name": {name}}
 	var zones []Zone
 	if err := c.get(ctx, "/zones?"+q.Encode(), &zones); err != nil {
