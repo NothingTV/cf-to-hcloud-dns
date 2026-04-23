@@ -9,7 +9,7 @@ Import DNS records from **Cloudflare** into **Hetzner Cloud DNS** with a single 
 
 ## Install
 
-Prebuilt binaries: see [Releases](./releases) (or build from source below).
+Prebuilt binaries: see [Releases](https://github.com/NothingTV/cf-to-hcloud-dns/releases) (or build from source below).
 
 ### Build from source
 
