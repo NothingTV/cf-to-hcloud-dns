@@ -3,6 +3,7 @@ package transform
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -77,6 +78,41 @@ func TestTransform_SRVAlreadyHasPriority(t *testing.T) {
 	}, 60)
 	if got[0].Values[0] != "10 20 5060 sip.example.com." {
 		t.Fatalf("SRV with full RDATA unchanged: %q", got[0].Values[0])
+	}
+}
+
+func TestTransform_CNAMEGetsTrailingDot(t *testing.T) {
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "www.example.com", Type: "CNAME", Content: "target.example.com", TTL: 300},
+	}, 60)
+	if len(got) != 1 || got[0].Values[0] != "target.example.com." {
+		t.Fatalf("CNAME should have trailing dot: %#v", got)
+	}
+}
+
+func TestTransform_CNAMEAtApexSkipped(t *testing.T) {
+	got, skipped := Transform("example.com", []SourceRecord{
+		{Name: "example.com", Type: "CNAME", Content: "proxy.example.net", TTL: 300},
+	}, 60)
+	if len(got) != 0 {
+		t.Fatalf("apex CNAME must be skipped: %#v", got)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0].Reason, "apex") {
+		t.Fatalf("expected apex CNAME skip reason, got %#v", skipped)
+	}
+}
+
+func TestTransform_ApexNSAlwaysSkipped(t *testing.T) {
+	// Custom (non-Cloudflare) apex NS must still be skipped — Hetzner owns
+	// the zone's nameservers.
+	got, skipped := Transform("example.com", []SourceRecord{
+		{Name: "example.com", Type: "NS", Content: "ns1.custom.net", TTL: 86400},
+	}, 60)
+	if len(got) != 0 {
+		t.Fatalf("apex NS must be skipped: %#v", got)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("expected 1 skip: %#v", skipped)
 	}
 }
 

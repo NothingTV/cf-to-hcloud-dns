@@ -69,11 +69,25 @@ func Transform(zoneName string, records []SourceRecord, minTTL int) (rrsets []Ta
 			skipped = append(skipped, SkipReason{r, "SOA is managed by Hetzner"})
 			continue
 		}
-		if strings.EqualFold(r.Type, "NS") && isCloudflareNS(r) && isApex(r.Name, zoneFQDN) {
-			skipped = append(skipped, SkipReason{r, "Cloudflare nameserver record"})
+		t := strings.ToUpper(r.Type)
+		// Any apex NS record is owned by Hetzner for primary zones. Importing
+		// one would conflict with the nameservers Hetzner creates itself, so
+		// we drop the whole set (Cloudflare's and any custom ones).
+		if t == "NS" && isApex(r.Name, zoneFQDN) {
+			reason := "apex NS record — Hetzner manages zone nameservers itself"
+			if isCloudflareNS(r) {
+				reason = "Cloudflare nameserver record"
+			}
+			skipped = append(skipped, SkipReason{r, reason})
 			continue
 		}
-		t := strings.ToUpper(r.Type)
+		// Cloudflare allows CNAME at the zone apex via "CNAME flattening".
+		// Hetzner Cloud follows the RFC and rejects it. Skip with a clear
+		// reason so the user knows to replace it with A/AAAA manually.
+		if t == "CNAME" && isApex(r.Name, zoneFQDN) {
+			skipped = append(skipped, SkipReason{r, "CNAME at zone apex is not allowed — replace with A/AAAA records"})
+			continue
+		}
 		if !hetznerSupported[t] {
 			skipped = append(skipped, SkipReason{r, "record type not supported by Hetzner Cloud DNS"})
 			continue
@@ -159,6 +173,11 @@ func normalizeValue(typ string, r SourceRecord) string {
 			return itoa(int(*r.Priority)) + " " + withTrailingDot(content)
 		}
 		return withTrailingDot(content)
+	case "CNAME", "NS", "PTR":
+		// Single-hostname RDATA. Hetzner accepts these with or without a
+		// trailing dot, but normalizing to FQDN form makes the zone file
+		// unambiguous and matches how Hetzner itself serializes them.
+		return ensureTrailingDot(content)
 	case "SRV":
 		// SRV RDATA is "priority weight port target". CF's content is
 		// "weight port target" (3 fields) with priority in a separate field.
