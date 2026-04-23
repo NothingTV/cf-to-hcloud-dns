@@ -1,7 +1,7 @@
-# Build output
-dns-migrate
-dns-migrate.exe
-dns-migrate-*
+# Build output (root only — don't match cmd/dns-migrate/ directory)
+/dns-migrate
+/dns-migrate.exe
+/dns-migrate-*
 
 # Local credentials
 .env
