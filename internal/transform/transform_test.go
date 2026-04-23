@@ -116,6 +116,44 @@ func TestTransform_ApexNSAlwaysSkipped(t *testing.T) {
 	}
 }
 
+func TestTransform_TXTUnquotedGetsWrapped(t *testing.T) {
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "dkim._domainkey.example.com", Type: "TXT", Content: "v=DKIM1;k=rsa;p=abc", TTL: 300},
+	}, 60)
+	if got[0].Values[0] != `"v=DKIM1;k=rsa;p=abc"` {
+		t.Fatalf("unquoted TXT should be wrapped: %q", got[0].Values[0])
+	}
+}
+
+func TestTransform_TXTAlreadyQuotedPassThrough(t *testing.T) {
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "example.com", Type: "TXT", Content: `"v=DMARC1; p=reject"`, TTL: 300},
+	}, 60)
+	if got[0].Values[0] != `"v=DMARC1; p=reject"` {
+		t.Fatalf("already-quoted TXT should pass through: %q", got[0].Values[0])
+	}
+}
+
+func TestTransform_TXTLongValueSplit(t *testing.T) {
+	long := strings.Repeat("a", 300)
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "example.com", Type: "TXT", Content: long, TTL: 300},
+	}, 60)
+	want := `"` + strings.Repeat("a", 255) + `" "` + strings.Repeat("a", 45) + `"`
+	if got[0].Values[0] != want {
+		t.Fatalf("long TXT should split at 255:\ngot:  %s\nwant: %s", got[0].Values[0], want)
+	}
+}
+
+func TestTransform_TXTWithEmbeddedQuoteIsEscaped(t *testing.T) {
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "example.com", Type: "TXT", Content: `foo"bar`, TTL: 300},
+	}, 60)
+	if got[0].Values[0] != `"foo\"bar"` {
+		t.Fatalf("embedded quote must be escaped: %q", got[0].Values[0])
+	}
+}
+
 func TestTransform_SubdomainNSKept(t *testing.T) {
 	got, _ := Transform("example.com", []SourceRecord{
 		{Name: "sub.example.com", Type: "NS", Content: "ns1.other.net", TTL: 86400},

@@ -173,6 +173,8 @@ func normalizeValue(typ string, r SourceRecord) string {
 			return itoa(int(*r.Priority)) + " " + withTrailingDot(content)
 		}
 		return withTrailingDot(content)
+	case "TXT":
+		return quoteTXT(content)
 	case "CNAME", "NS", "PTR":
 		// Single-hostname RDATA. Hetzner accepts these with or without a
 		// trailing dot, but normalizing to FQDN form makes the zone file
@@ -225,6 +227,81 @@ func ensureTrailingDot(s string) string {
 		return s
 	}
 	return s + "."
+}
+
+// quoteTXT wraps a TXT record value in double quotes, escaping embedded
+// quotes and backslashes, and splits strings longer than 255 bytes into
+// multiple quoted chunks joined by spaces (as required by RFC 1035 and
+// accepted by Hetzner Cloud).
+//
+// Values that are already fully quoted (e.g. `"v=DMARC1; ..."`) are left
+// as-is.
+func quoteTXT(content string) string {
+	if isAlreadyQuoted(content) {
+		return content
+	}
+	const maxChunk = 255
+	var chunks []string
+	for len(content) > maxChunk {
+		chunks = append(chunks, content[:maxChunk])
+		content = content[maxChunk:]
+	}
+	if content != "" {
+		chunks = append(chunks, content)
+	}
+	out := make([]string, len(chunks))
+	for i, c := range chunks {
+		out[i] = `"` + escapeTXT(c) + `"`
+	}
+	return strings.Join(out, " ")
+}
+
+// isAlreadyQuoted reports whether the content is a sequence of one or more
+// `"..."` quoted strings separated by whitespace. Conservative: any parse
+// ambiguity returns false so we re-quote.
+func isAlreadyQuoted(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return false
+	}
+	inQuote := false
+	escaped := false
+	for _, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch r {
+		case '\\':
+			if !inQuote {
+				return false
+			}
+			escaped = true
+		case '"':
+			inQuote = !inQuote
+		case ' ', '\t':
+			if !inQuote {
+				continue
+			}
+		default:
+			if !inQuote {
+				return false
+			}
+		}
+	}
+	return !inQuote
+}
+
+func escapeTXT(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\\' || r == '"' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func itoa(i int) string {

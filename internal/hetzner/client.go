@@ -91,7 +91,7 @@ func (c *Client) CreateZone(ctx context.Context, name string, ttl int) (*Zone, e
 
 // DeleteZone removes a zone. The API returns an Action; we don't track it.
 func (c *Client) DeleteZone(ctx context.Context, nameOrID string) error {
-	return c.do(ctx, http.MethodDelete, "/zones/"+url.PathEscape(nameOrID), nil, nil)
+	return c.do(ctx, http.MethodDelete, "/zones/"+nameOrID, nil, nil)
 }
 
 // ListRRSets paginates through every RRSet in a zone.
@@ -100,7 +100,7 @@ func (c *Client) ListRRSets(ctx context.Context, zone string) ([]RRSet, error) {
 	page := 1
 	for {
 		q := url.Values{"page": {fmt.Sprintf("%d", page)}, "per_page": {"50"}}
-		path := "/zones/" + url.PathEscape(zone) + "/rrsets?" + q.Encode()
+		path := "/zones/" + zone + "/rrsets?" + q.Encode()
 		var resp struct {
 			RRSets []RRSet `json:"rrsets"`
 			Meta   struct {
@@ -136,7 +136,7 @@ func (c *Client) CreateRRSet(ctx context.Context, zone string, rr RRSet) (*RRSet
 	var resp struct {
 		RRSet RRSet `json:"rrset"`
 	}
-	path := "/zones/" + url.PathEscape(zone) + "/rrsets"
+	path := "/zones/" + zone + "/rrsets"
 	if err := c.do(ctx, http.MethodPost, path, body, &resp); err != nil {
 		return nil, err
 	}
@@ -145,23 +145,28 @@ func (c *Client) CreateRRSet(ctx context.Context, zone string, rr RRSet) (*RRSet
 
 // DeleteRRSet removes the RRSet identified by (name, type).
 func (c *Client) DeleteRRSet(ctx context.Context, zone, name, typ string) error {
-	path := "/zones/" + url.PathEscape(zone) + "/rrsets/" + url.PathEscape(name) + "/" + url.PathEscape(typ)
-	return c.do(ctx, http.MethodDelete, path, nil, nil)
+	return c.do(ctx, http.MethodDelete, rrsetPath(zone, name, typ), nil, nil)
 }
 
 // SetRecords replaces the list of records of an existing RRSet. The RRSet
 // itself (name, type, TTL, labels) is not touched.
 func (c *Client) SetRecords(ctx context.Context, zone, name, typ string, records []Record) error {
 	body := map[string]any{"records": records}
-	path := "/zones/" + url.PathEscape(zone) + "/rrsets/" + url.PathEscape(name) + "/" + url.PathEscape(typ) + "/actions/set_records"
-	return c.do(ctx, http.MethodPost, path, body, nil)
+	return c.do(ctx, http.MethodPost, rrsetPath(zone, name, typ)+"/actions/set_records", body, nil)
 }
 
 // ChangeTTL updates the TTL of an existing RRSet.
 func (c *Client) ChangeTTL(ctx context.Context, zone, name, typ string, ttl int) error {
 	body := map[string]any{"ttl": ttl}
-	path := "/zones/" + url.PathEscape(zone) + "/rrsets/" + url.PathEscape(name) + "/" + url.PathEscape(typ) + "/actions/change_ttl"
-	return c.do(ctx, http.MethodPost, path, body, nil)
+	return c.do(ctx, http.MethodPost, rrsetPath(zone, name, typ)+"/actions/change_ttl", body, nil)
+}
+
+// rrsetPath builds the RRSet URL path segment. Hetzner Cloud expects names
+// like `*` and `@` in their literal form — %-encoding them (e.g. %2A, %40)
+// causes 404s because the API does not decode them. DNS names and types are
+// already constrained to URL-safe characters, so no escaping is needed.
+func rrsetPath(zone, name, typ string) string {
+	return "/zones/" + zone + "/rrsets/" + name + "/" + typ
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
