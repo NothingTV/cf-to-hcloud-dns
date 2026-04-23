@@ -36,7 +36,7 @@ func TestTransform_GroupsIntoRRSets(t *testing.T) {
 	got, skipped := Transform(zone, records, 60)
 	want := []TargetRRSet{
 		{Name: "@", Type: "A", TTL: 300, Values: []string{"1.2.3.4", "5.6.7.8"}}, // TTL = max of group, clamped
-		{Name: "@", Type: "MX", TTL: 3600, Values: []string{"10 mail.example.com"}},
+		{Name: "@", Type: "MX", TTL: 3600, Values: []string{"10 mail.example.com."}},
 		{Name: "@", Type: "TXT", TTL: 60, Values: []string{"\"v=spf1 -all\""}},
 		{Name: "www", Type: "A", TTL: 300, Values: []string{"1.2.3.4"}},
 	}
@@ -52,8 +52,31 @@ func TestTransform_MXPriorityNotDoubled(t *testing.T) {
 	got, _ := Transform("example.com", []SourceRecord{
 		{Name: "example.com", Type: "MX", Content: "10 mail.example.com", TTL: 3600, Priority: u16(10)},
 	}, 60)
-	if len(got) != 1 || got[0].Values[0] != "10 mail.example.com" {
+	if len(got) != 1 || got[0].Values[0] != "10 mail.example.com." {
 		t.Fatalf("priority should not be double-prefixed: %#v", got)
+	}
+}
+
+func TestTransform_SRVAssemblesFullRDATA(t *testing.T) {
+	// Cloudflare's SRV content is "weight port target"; priority is separate.
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "_autodiscover._tcp.example.com", Type: "SRV", Content: "1 443 salem.nothingtv.de", TTL: 3600, Priority: u16(1)},
+	}, 60)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 RRSet: %#v", got)
+	}
+	want := "1 1 443 salem.nothingtv.de."
+	if got[0].Values[0] != want {
+		t.Fatalf("SRV RDATA: got %q, want %q", got[0].Values[0], want)
+	}
+}
+
+func TestTransform_SRVAlreadyHasPriority(t *testing.T) {
+	got, _ := Transform("example.com", []SourceRecord{
+		{Name: "_sip._tcp.example.com", Type: "SRV", Content: "10 20 5060 sip.example.com.", TTL: 3600, Priority: u16(10)},
+	}, 60)
+	if got[0].Values[0] != "10 20 5060 sip.example.com." {
+		t.Fatalf("SRV with full RDATA unchanged: %q", got[0].Values[0])
 	}
 }
 

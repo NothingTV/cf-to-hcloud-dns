@@ -83,10 +83,7 @@ func Transform(zoneName string, records []SourceRecord, minTTL int) (rrsets []Ta
 		if ttl < minTTL {
 			ttl = minTTL
 		}
-		value := r.Content
-		if needsPriority(t) && r.Priority != nil && !startsWithPriority(value) {
-			value = itoa(int(*r.Priority)) + " " + value
-		}
+		value := normalizeValue(t, r)
 
 		k := key{normalizeName(r.Name, zoneFQDN), t}
 		g, ok := groups[k]
@@ -144,10 +141,44 @@ func normalizeName(name, zoneFQDN string) string {
 	return n
 }
 
-func needsPriority(t string) bool { return t == "MX" || t == "SRV" }
+// normalizeValue produces the RDATA string Hetzner Cloud expects for a given
+// record type. Cloudflare stores priority separately for MX and SRV, and the
+// content field format differs per record type, so we have to reassemble.
+func normalizeValue(typ string, r SourceRecord) string {
+	content := strings.TrimSpace(r.Content)
+	switch typ {
+	case "MX":
+		// CF content is usually just the target. If it already leads with a
+		// numeric priority we keep it; otherwise prepend r.Priority. MX target
+		// must be a hostname, never numeric, so "first token is digits" is a
+		// reliable signal that priority is already embedded.
+		if firstFieldIsNumeric(content) {
+			return withTrailingDotOnLastField(content)
+		}
+		if r.Priority != nil {
+			return itoa(int(*r.Priority)) + " " + withTrailingDot(content)
+		}
+		return withTrailingDot(content)
+	case "SRV":
+		// SRV RDATA is "priority weight port target". CF's content is
+		// "weight port target" (3 fields) with priority in a separate field.
+		// Don't use a "leading digit" heuristic here — weight is numeric too.
+		fields := strings.Fields(content)
+		if len(fields) == 4 {
+			return withTrailingDotOnLastField(content)
+		}
+		if len(fields) == 3 && r.Priority != nil {
+			fields[2] = ensureTrailingDot(fields[2])
+			return itoa(int(*r.Priority)) + " " + strings.Join(fields, " ")
+		}
+		return content
+	default:
+		return content
+	}
+}
 
-func startsWithPriority(content string) bool {
-	fields := strings.Fields(content)
+func firstFieldIsNumeric(s string) bool {
+	fields := strings.Fields(s)
 	if len(fields) == 0 {
 		return false
 	}
@@ -157,6 +188,24 @@ func startsWithPriority(content string) bool {
 		}
 	}
 	return true
+}
+
+func withTrailingDot(s string) string { return ensureTrailingDot(strings.TrimSpace(s)) }
+
+func withTrailingDotOnLastField(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return s
+	}
+	fields[len(fields)-1] = ensureTrailingDot(fields[len(fields)-1])
+	return strings.Join(fields, " ")
+}
+
+func ensureTrailingDot(s string) string {
+	if s == "" || strings.HasSuffix(s, ".") {
+		return s
+	}
+	return s + "."
 }
 
 func itoa(i int) string {
