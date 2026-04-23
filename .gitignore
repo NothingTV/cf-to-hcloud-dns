@@ -1,0 +1,15 @@
+# Build output
+dns-migrate
+dns-migrate.exe
+dns-migrate-*
+
+# Local credentials
+.env
+.env.local
+*.env
+
+# IDE / OS cruft
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
